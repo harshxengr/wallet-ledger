@@ -1,0 +1,56 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Account {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  currency     String   @default("INR") @db.Char(3)
+  balanceMinor BigInt   @default(0) @map("balance_minor")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  transfersOut  Transfer[]    @relation("FromAccount")
+  transfersIn   Transfer[]    @relation("ToAccount")
+  ledgerEntries LedgerEntry[]
+
+  @@map("accounts")
+}
+
+model Transfer {
+  id            String   @id @default(uuid()) @db.Uuid
+  fromAccountId String   @map("from_account_id") @db.Uuid
+  toAccountId   String   @map("to_account_id") @db.Uuid
+  amountMinor   BigInt   @map("amount_minor")
+  status        String
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  fromAccount   Account       @relation("FromAccount", fields: [fromAccountId], references: [id])
+  toAccount     Account       @relation("ToAccount", fields: [toAccountId], references: [id])
+  ledgerEntries LedgerEntry[]
+
+  @@map("transfers")
+}
+
+model LedgerEntry {
+  id          BigInt   @id @default(autoincrement())
+  transferId  String   @map("transfer_id") @db.Uuid
+  accountId   String   @map("account_id") @db.Uuid
+  direction   String
+  amountMinor BigInt   @map("amount_minor")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  transfer Transfer @relation(fields: [transferId], references: [id])
+  account  Account  @relation(fields: [accountId], references: [id])
+
+  @@map("ledger_entries")
+}
