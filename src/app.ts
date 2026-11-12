@@ -1,10 +1,12 @@
 import express from "express";
 import { z } from "zod";
 import { prisma } from "./db";
+import { createHash } from "node:crypto";
 import {
     transferMoney,
     InsufficientFundsError,
-    AccountNotFoundError
+    AccountNotFoundError,
+    IdempotencyKeyReuseError
 } from "./transfer";
 
 export const app = express();
@@ -29,6 +31,8 @@ const transferSchema = z.object({
         message: "cannot transfer to the same account",
         path: ["toAccountId"]
     })
+
+const idempotencyKeySchema = z.string().min(8).max(100);
 
 const idParamSchema = z.object({
     id: z.string().uuid()
@@ -109,17 +113,35 @@ app.get("/api/v1/wallets/:id", async (req, res) => {
 })
 
 app.post("/api/v1/transfers", async (req, res) => {
+
+    const keyParsed = idempotencyKeySchema.safeParse(req.header("Idempotency-Key"));
+    if (!keyParsed.success) {
+        return res.status(400).json({
+            error: {
+                code: "idempotency_key_required",
+                message: "Idempotency-Key header (8 to 100 characters) is required",
+            },
+        });
+    }
+
     const parsed = transferSchema.safeParse(req.body);
     if (!parsed.success) return validationError(res, parsed.error.issues);
 
     const { fromAccountId, toAccountId, amountMinor } = parsed.data;
 
+    const requestHash = createHash("sha256")
+        .update(JSON.stringify({ fromAccountId, toAccountId, amountMinor }))
+        .digest("hex");
+
     try {
-        const transfer = await transferMoney(
+        const { transfer, replayed } = await transferMoney(
             fromAccountId,
             toAccountId,
-            BigInt(amountMinor)
+            BigInt(amountMinor),
+            { key: keyParsed.data, requestHash }
         );
+
+        if (replayed) res.setHeader("Idempotent-Replay", "true");
 
         return res.status(201).json(serializeTransfer(transfer));
     } catch (err) {
@@ -137,6 +159,15 @@ app.post("/api/v1/transfers", async (req, res) => {
                 error: {
                     code: "wallet_not_found",
                     message: "wallet not found"
+                },
+            });
+        }
+
+        if (err instanceof IdempotencyKeyReuseError) {
+            return res.status(422).json({
+                error: {
+                    code: "idempotency_key_reuse",
+                    message: "this Idempotency-Key was already used with a different request",
                 },
             });
         }

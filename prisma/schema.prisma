@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -37,6 +32,7 @@ model Transfer {
   fromAccount   Account       @relation("FromAccount", fields: [fromAccountId], references: [id])
   toAccount     Account       @relation("ToAccount", fields: [toAccountId], references: [id])
   ledgerEntries LedgerEntry[]
+  idempotencyKeys IdempotencyKey[]
 
   @@map("transfers")
 }
@@ -53,4 +49,17 @@ model LedgerEntry {
   account  Account  @relation(fields: [accountId], references: [id])
 
   @@map("ledger_entries")
+}
+
+model IdempotencyKey {
+  scopeId     String   @map("scope_id") @db.Uuid
+  key         String
+  requestHash String   @map("request_hash")
+  transferId  String?  @map("transfer_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  transfer Transfer? @relation(fields: [transferId], references: [id])
+
+  @@id([scopeId, key])
+  @@map("idempotency_keys")
 }
